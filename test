@@ -1,0 +1,152 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Nasabah;
+use App\Marketing;
+use App\Investasi;
+use Carbon\Carbon;
+use Yajra\Datatables\Datatables;
+use Sentinel;
+use DB;
+use Excel;
+use Mail;
+use App\Export;
+use Maatwebsite\Excel\Concerns\FromCollection;
+
+class AdminRunningoutInvestListController extends Controller
+{
+    public function index(){
+        return view ('admin.runningout_investment_list');
+    }
+    public function getDataAdmRunOutInvestList()
+    {     
+        $users = Investasi::join('tenors', 'investasis.tenor_id', '=', 'tenors.id')
+        ->join('nasabahs', 'investasis.nasabah_id', '=', 'nasabahs.id')
+        ->join('marketings', 'investasis.marketing_id', '=', 'marketings.id')
+        ->select(['investasis.id AS investid',
+        'nasabahs.nama AS namanas',
+        'nasabahs.no_ktp AS noktp',
+        'nasabahs.alamat AS alamat',
+        'nasabahs.no_hp AS hp',
+        'marketings.id AS mkid',
+        'marketings.jabatan_id AS jabid',
+        'marketings.nama_mk AS namamar', 
+        'marketings.stat AS marstat', 
+        'tenors.id AS tenorid', 
+        'tenors.periode AS tenor', 
+        'jml_investasi AS invest', 
+        'tgl_mul_tenor AS tglmul', 
+        'tgl_akhir_tenor AS tglhir', 
+        'stat_investasi AS stat_investasi'])
+        ->orderBy('investasis.tgl_mul_tenor', 'ASC')
+        ->where ('investasis.stat_investasi', '=', "2")
+        ->whereRaw ('investasis.tgl_akhir_tenor <= NOW() + INTERVAL 14 DAY');
+        
+        return Datatables::of($users)
+        ->addColumn('action', function ($user) {
+            return '
+            <button data-toggle="modal" data-target="#modalverifydetail" id="detail" class="btn btn-success" data-memberidv="'.$user->noktp.'" data-membernamev="'.$user->namanas.'" data-memberaddressv="'.$user->alamat.'" data-memberphonev="'.$user->hp.'" data-memberinvestv="'.$user->invest.'" data-membertenorv="'.$user->tenor.'" data-tglmul="'.$user->tglmul.'" data-tglhir="'.$user->tglhir.'" ><i class="ti-search"></i></button>';
+         })
+        ->editColumn('status', function($dtt) {
+            if($dtt->stat_investasi == 2){
+                return '<span class="label label-warning">Running Out</span>';
+            }
+        })
+        ->editColumn('invest', function($dtt) {
+            $nom = $dtt->invest;
+            $nomi = number_format($nom);
+            return $nomi;
+        })
+        ->rawColumns(['id', 'action', 'status', 'invest'])
+        ->addIndexColumn()
+        ->removeColumn('password')
+        ->make(true);  
+    }
+    
+    public function export(){
+        Excel::store(new Export, 'Report.xls');
+
+        $path = storage_path('app\Report.xls');
+        $user = "test";
+        Mail::send('login.repot',[
+    		'user' => $user
+
+    	], function($massage)use ($path){
+    		$massage->to("Riyanti.niken@gmail.com");
+            $massage->subject("Hello, Report Investment Running Out");
+            $massage->attach($path);
+        });
+        try{
+            return redirect('/indexadm/runningout_investment')
+            ->withSuccess(sprintf('Email sent !!!')); 
+        }
+        catch(QueryException $e){
+            return redirect()->back()->with(['error' => "Error."]);
+        } 
+    }
+
+    public function dailyCheck(){
+        $users = Investasi::join('marketings', 'investasis.marketing_id', '=', 'marketings.id')
+        ->join('users', 'users.id', '=', 'marketings.user_id')
+        ->select([
+        'marketings.id AS mkid',
+        'users.email AS email'])
+        ->where ('investasis.stat_investasi', '=', "2")
+        ->whereRaw ('investasis.tgl_akhir_tenor <= NOW() + INTERVAL 14 DAY')
+        ->groupBy('marketing_id')
+        ->get();
+        //return $users;
+        $user = "test";
+        try{
+            foreach($users as $us)
+            {   
+                $marketingid = $us->mkid;
+                $customers = Investasi::join('tenors', 'investasis.tenor_id', '=', 'tenors.id')
+                ->join('nasabahs', 'investasis.nasabah_id', '=', 'nasabahs.id')
+                ->join('marketings', 'investasis.marketing_id', '=', 'marketings.id')
+                ->join('users', 'users.id', '=', 'marketings.user_id')
+                ->select(['investasis.id AS investid',
+                'nasabahs.nama AS namanas',
+                'nasabahs.no_ktp AS noktp',
+                'nasabahs.alamat AS alamat',
+                'nasabahs.no_hp AS hp',
+                'marketings.id AS mkid',
+                'marketings.jabatan_id AS jabid',
+                'marketings.nama_mk AS namamar', 
+                'marketings.stat AS marstat', 
+                'users.email AS email',
+                'tenors.id AS tenorid', 
+                'tenors.periode AS tenor', 
+                'jml_investasi AS invest', 
+                'tgl_mul_tenor AS tglmul', 
+                'tgl_akhir_tenor AS tglhir', 
+                'stat_investasi AS stat_investasi'])
+                ->orderBy('investasis.tgl_mul_tenor', 'ASC')
+                ->where ('investasis.stat_investasi', '=', "2")
+                ->where ('investasis.marketing_id', $marketingid)                
+                ->whereRaw ('investasis.tgl_akhir_tenor <= NOW() + INTERVAL 14 DAY')
+                ->get();
+
+                foreach($customers as $customer){
+                    Mail::send('login.repot',[
+                        'user' => $customer
+            
+                    ], function($massage)use ($us){
+                        $massage->from("info.hsnbdg@gmail.com");
+                        $massage->to($us->email);
+                        $massage->subject("Hello, Report Investment Running Out");
+                    });
+                }
+                
+            } 
+            
+            return ('Email sent !!!'); 
+        }
+        catch(QueryException $e){
+            return ("error");
+        } 
+    }
+    
+}
